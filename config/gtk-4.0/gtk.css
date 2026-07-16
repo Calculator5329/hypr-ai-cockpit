@@ -1,0 +1,5 @@
+@import url("colors.css");
+window, dialog { background-color: @theme_bg_color; color: @theme_fg_color; }
+entry, textview { background-color: @theme_base_color; color: @theme_fg_color; }
+button { border-radius: 6px; }
+

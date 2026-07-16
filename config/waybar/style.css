@@ -1,0 +1,43 @@
+@define-color background #0b0f14;
+@define-color accent #3ecf8e;
+@define-color accent-soft #9ad8bb;
+@define-color muted #7fae94;
+@define-color text #e7e9ee;
+@define-color warning #e5b84d;
+@define-color server #5aa2f0;
+
+* {
+  border: none;
+  border-radius: 0;
+  font-family: "JetBrainsMono Nerd Font", "Noto Sans", sans-serif;
+  font-size: 13px;
+  min-height: 0;
+}
+window#waybar { background: transparent; color: @text; }
+window#waybar > box {
+  background: alpha(@background, 0.96);
+  border: 1px solid alpha(@accent, 0.28);
+  border-radius: 10px;
+  padding: 0 6px;
+}
+#workspaces button, #clock, #wireplumber, #battery, #tray,
+#custom-localhosts, #custom-packages, #custom-power, #custom-finance {
+  padding: 0 9px;
+  margin: 4px 0;
+  color: @text;
+}
+#workspaces button { color: @muted; padding: 0 7px; }
+#workspaces button.active, #workspaces button:hover { color: @accent; }
+#clock { color: @accent-soft; font-weight: 700; }
+#custom-localhosts { color: @server; }
+#custom-packages { color: @warning; }
+#custom-packages.empty { color: @muted; }
+#custom-power { color: @accent; font-size: 16px; }
+#wireplumber:hover, #custom-localhosts:hover, #custom-packages:hover,
+#custom-power:hover, #workspaces button:hover {
+  background: alpha(@accent, 0.15);
+  border-radius: 7px;
+}
+#battery.warning { color: @warning; }
+#battery.critical { color: #f07178; }
+
