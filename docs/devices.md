@@ -39,9 +39,9 @@ agent on
 default-agent
 scan on
 # Select the address displayed for your headset, then:
-pair AA:BB:CC:DD:EE:FF
-trust AA:BB:CC:DD:EE:FF
-connect AA:BB:CC:DD:EE:FF
+pair <your-device-address>
+trust <your-device-address>
+connect <your-device-address>
 quit
 ```
 
