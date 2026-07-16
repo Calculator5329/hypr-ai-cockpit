@@ -1,0 +1,2 @@
+# Widget daemon used by the optional cockpit panel
+eww

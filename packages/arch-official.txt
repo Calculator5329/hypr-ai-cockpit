@@ -1,0 +1,30 @@
+# Core Wayland cockpit session
+hyprland
+hypridle
+xdg-desktop-portal-hyprland
+
+# Shell, launcher, notification, lock, and logout surfaces
+waybar
+wofi
+mako
+swaylock
+wlogout
+alacritty
+
+# Waybar and toolbar widget dependencies
+brightnessctl
+curl
+networkmanager
+pacman-contrib
+pavucontrol
+playerctl
+pipewire-pulse
+power-profiles-daemon
+python
+ttf-jetbrains-mono-nerd
+upower
+wireplumber
+wl-clipboard
+
+# Required to build/install the AUR eww package
+base-devel
