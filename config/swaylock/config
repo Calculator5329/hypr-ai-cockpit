@@ -1,0 +1,23 @@
+ignore-empty-password
+disable-caps-lock-text
+font=Noto Sans
+screenshots
+effect-blur=7x5
+effect-vignette=0.5:0.5
+indicator
+indicator-radius=120
+indicator-thickness=20
+clock
+timestr=%I:%M %p
+datestr=%A, %d %B
+ring-color=3ecf8e
+key-hl-color=9ad8bb
+line-color=1d7d62
+separator-color=131a22
+inside-color=131a22
+bs-hl-color=5aa2f0
+layout-bg-color=131a22
+layout-border-color=3ecf8e
+layout-text-color=e7e9ee
+text-color=e7e9ee
+
