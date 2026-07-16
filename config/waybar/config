@@ -1,0 +1,70 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 34,
+  "margin-top": 6,
+  "margin-left": 10,
+  "margin-right": 10,
+  "spacing": 0,
+
+  "modules-left": ["hyprland/workspaces"],
+  "modules-center": ["clock"],
+  "modules-right": ["custom/localhosts", "wireplumber", "battery", "tray", "custom/packages", "custom/power"],
+
+  "hyprland/workspaces": {
+    "format": "{name}",
+    "sort-by-number": true,
+    "on-scroll-up": "hyprctl dispatch workspace e+1",
+    "on-scroll-down": "hyprctl dispatch workspace e-1"
+  },
+  "clock": {
+    "format": "󰥔  {:%I:%M %p   ·   %a %e %b}",
+    "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>"
+  },
+  "wireplumber": {
+    "format": "{icon} {volume}%",
+    "format-muted": "󰖁",
+    "format-icons": ["󰕿", "󰖀", "󰕾"],
+    "on-click": "pavucontrol",
+    "on-scroll-up": "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+",
+    "on-scroll-down": "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+  },
+  "battery": {
+    "format": "{icon} {capacity}%",
+    "format-charging": "󰂄 {capacity}%",
+    "format-icons": ["󰁺", "󰁻", "󰁼", "󰁽", "󰁹"]
+  },
+  "tray": { "icon-size": 15, "spacing": 6 },
+
+  "custom/localhosts": {
+    "format": "{}",
+    "return-type": "json",
+    "interval": 3,
+    "exec": "python3 ~/.config/waybar/localhosts.py",
+    "on-click": "python3 ~/.config/waybar/localhosts.py --open",
+    "tooltip": true
+  },
+  "custom/packages": {
+    "format": "󰏖 {}",
+    "return-type": "json",
+    "interval": 3600,
+    "exec": "~/.config/waybar/updates.sh",
+    "on-click": "alacritty -e sh -lc '$HOME/.config/waybar/package-installer.sh'",
+    "tooltip": true
+  },
+  "custom/power": {
+    "format": "󰐥",
+    "tooltip": false,
+    "on-click": "wlogout"
+  },
+
+  // Optional finance module. It is deliberately absent from all module arrays.
+  // See docs/toolbar.md before enabling and keep personal data outside this repo.
+  "custom/finance": {
+    "format": "{}",
+    "return-type": "json",
+    "interval": 600,
+    "exec": "python3 ~/.config/waybar/finance.py"
+  }
+}
+

@@ -1,0 +1,6 @@
+@import url("colors.css");
+window, dialog, messagedialog { background-color: @theme_bg_color; color: @theme_fg_color; }
+entry, textview, treeview.view { background-color: @theme_base_color; color: @theme_fg_color; }
+button { border-radius: 6px; }
+selection { background-color: @theme_selected_bg_color; color: @theme_selected_fg_color; }
+

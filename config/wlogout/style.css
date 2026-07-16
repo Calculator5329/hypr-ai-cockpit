@@ -1,0 +1,17 @@
+* { background-image: none; box-shadow: none; }
+window { background-color: rgba(11, 15, 20, 0.94); }
+button {
+  border: 1px solid #1d7d62;
+  color: #e7e9ee;
+  background-color: #131a22;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 25%;
+}
+button:focus, button:active, button:hover { background-color: #1d7d62; outline-style: none; }
+#lock { background-image: image(url("/usr/share/wlogout/icons/lock.png")); }
+#logout { background-image: image(url("/usr/share/wlogout/icons/logout.png")); }
+#suspend { background-image: image(url("/usr/share/wlogout/icons/suspend.png")); }
+#shutdown { background-image: image(url("/usr/share/wlogout/icons/shutdown.png")); }
+#reboot { background-image: image(url("/usr/share/wlogout/icons/reboot.png")); }
+

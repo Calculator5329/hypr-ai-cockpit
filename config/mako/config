@@ -1,0 +1,12 @@
+max-visible=10
+layer=top
+font=Noto Sans 10
+background-color=#131a22dd
+text-color=#e7e9ee
+border-color=#3ecf8e
+border-radius=8
+max-icon-size=48
+default-timeout=10000
+anchor=top-right
+margin=20
+
