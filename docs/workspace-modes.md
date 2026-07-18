@@ -71,3 +71,15 @@ bind = SUPER, F3, exec, /path/to/hypr-ai-cockpit/scripts/workspace-mode gaming
 The script does not need to know how it was triggered. An external voice router
 can call the same command (for example, `workspace-mode tv`) for a spoken
 desktop-mode shortcut.
+
+## Compatibility: Lua-config Hyprland builds
+
+Some Hyprland setups use a Lua configuration layer where `hyprctl dispatch`
+expects `hl.dsp.*` dispatcher syntax instead of classic
+`dispatch exec <cmd>`. On those systems the engine's dispatches fail with
+`hl.dispatch(...)` parse errors. Fix: point `WORKSPACE_MODE_HYPRCTL` at a
+small translating shim that rewrites the six dispatch shapes this script
+emits (`exec`, `focuswindow`, `focusmonitor`, `movewindow mon:`,
+`movetoworkspace`, `fullscreen`) into `hl.dsp.*` calls and passes
+everything else through. Note the shim should also treat `error:` text on
+stdout as a failure — Lua-hyprland exits 0 even on dispatch errors.
