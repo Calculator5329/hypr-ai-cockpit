@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Pull or launch a repeatable Hyprland desktop mode.
+
+Mode definitions live in config/workspace-modes.json. This script uses only
+Python's standard library so it remains useful on a stock Hyprland install.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG = ROOT / "config" / "workspace-modes.json"
+POLL_SECONDS = 10.0
+POLL_INTERVAL = 0.25
+
+
+class ModeError(RuntimeError):
+    """A mode definition or Hyprland operation could not be completed."""
+
+
+def config_path() -> Path:
+    """Allow an alternate config for testing without changing the default."""
+    override = os.environ.get("WORKSPACE_MODE_CONFIG")
+    return Path(override).expanduser() if override else DEFAULT_CONFIG
+
+
+def hyprctl_command() -> str:
+    """Allow a wrapper in tests while using hyprctl in normal desktop use."""
+    return os.environ.get("WORKSPACE_MODE_HYPRCTL", "hyprctl")
+
+
+def run_hyprctl(*args: str, capture_output: bool = False) -> str:
+    command = [hyprctl_command(), *args]
+    try:
+        completed = subprocess.run(
+            command,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE if capture_output else None,
+            stderr=subprocess.PIPE if capture_output else None,
+        )
+    except FileNotFoundError as error:
+        raise ModeError("hyprctl was not found; run this from a Hyprland session.") from error
+    except subprocess.CalledProcessError as error:
+        details = (error.stderr or error.stdout or "").strip()
+        suffix = f": {details}" if details else ""
+        raise ModeError(f"hyprctl {' '.join(args)} failed{suffix}") from error
+    return completed.stdout or ""
+
+
+def clients() -> list[dict[str, Any]]:
+    try:
+        value = json.loads(run_hyprctl("clients", "-j", capture_output=True))
+    except json.JSONDecodeError as error:
+        raise ModeError("hyprctl clients -j returned invalid JSON.") from error
+    if not isinstance(value, list):
+        raise ModeError("hyprctl clients -j did not return a client list.")
+    return [client for client in value if isinstance(client, dict)]
+
+
+def matches(client: dict[str, Any], matcher: Any) -> bool:
+    """Match a client against a string or class/title regex object."""
+    window_class = str(client.get("class", ""))
+    title = str(client.get("title", ""))
+    if isinstance(matcher, str):
+        return bool(re.search(matcher, window_class) or re.search(matcher, title))
+    if not isinstance(matcher, dict) or not matcher:
+        raise ModeError("match must be a regex string or an object with class and/or title regexes.")
+
+    class_pattern = matcher.get("class")
+    title_pattern = matcher.get("title")
+    if class_pattern is not None and not isinstance(class_pattern, str):
+        raise ModeError("match.class must be a regex string.")
+    if title_pattern is not None and not isinstance(title_pattern, str):
+        raise ModeError("match.title must be a regex string.")
+    if class_pattern is None and title_pattern is None:
+        raise ModeError("match must include class and/or title.")
+
+    return (
+        (class_pattern is None or bool(re.search(class_pattern, window_class)))
+        and (title_pattern is None or bool(re.search(title_pattern, title)))
+    )
+
+
+def find_client(matcher: Any, excluded_addresses: set[str] | None = None) -> dict[str, Any] | None:
+    excluded_addresses = excluded_addresses or set()
+    for client in clients():
+        address = str(client.get("address", ""))
+        if address not in excluded_addresses and matches(client, matcher):
+            return client
+    return None
+
+
+def address_of(client: dict[str, Any]) -> str:
+    address = client.get("address")
+    if not isinstance(address, str) or not address:
+        raise ModeError("Matched a client without a Hyprland address.")
+    return address
+
+
+def is_fullscreen(client: dict[str, Any]) -> bool:
+    value = client.get("fullscreen", False)
+    return value is True or value == 1 or value == "1" or value == "true"
+
+
+def dispatch(*args: str) -> None:
+    run_hyprctl("dispatch", *args)
+
+
+def place_client(client: dict[str, Any], app: dict[str, Any]) -> None:
+    """Reassert a client's requested placement using Hyprland dispatchers."""
+    address = address_of(client)
+    monitor = app["monitor"]
+    selector = f"address:{address}"
+
+    # movewindow operates on the active window. Select this client first,
+    # then activate its target monitor and select it again after the move.
+    dispatch("focuswindow", selector)
+    dispatch("movewindow", f"mon:{monitor}")
+    workspace = app.get("workspace")
+    if workspace is not None:
+        dispatch("movetoworkspace", str(workspace))
+    dispatch("focusmonitor", str(monitor))
+    dispatch("focuswindow", selector)
+
+    fullscreen = app.get("fullscreen")
+    if fullscreen is not None and is_fullscreen(client) != fullscreen:
+        dispatch("fullscreen", "1" if fullscreen else "0")
+
+
+def validate_app(app: Any, index: int) -> dict[str, Any]:
+    if not isinstance(app, dict):
+        raise ModeError(f"apps[{index}] must be an object.")
+    for field in ("match", "launch", "monitor"):
+        if field not in app:
+            raise ModeError(f"apps[{index}] is missing required field '{field}'.")
+    if not isinstance(app["launch"], str) or not app["launch"].strip():
+        raise ModeError(f"apps[{index}].launch must be a non-empty command string.")
+    if not isinstance(app["monitor"], (int, str)) or isinstance(app["monitor"], bool):
+        raise ModeError(f"apps[{index}].monitor must be a monitor ID or name.")
+    if "workspace" in app and not isinstance(app["workspace"], (int, str)):
+        raise ModeError(f"apps[{index}].workspace must be a workspace ID or name.")
+    if "fullscreen" in app and not isinstance(app["fullscreen"], bool):
+        raise ModeError(f"apps[{index}].fullscreen must be true or false.")
+    try:
+        matches({"class": "", "title": ""}, app["match"])
+    except re.error as error:
+        raise ModeError(f"apps[{index}] has an invalid match regex: {error}") from error
+    return app
+
+
+def load_mode(name: str) -> dict[str, Any]:
+    path = config_path()
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise ModeError(f"Mode config not found: {path}") from error
+    except json.JSONDecodeError as error:
+        raise ModeError(f"Mode config contains invalid JSON: {error}") from error
+
+    modes = config.get("modes") if isinstance(config, dict) else None
+    if not isinstance(modes, dict):
+        raise ModeError("Mode config must contain a 'modes' object.")
+    mode = modes.get(name)
+    if not isinstance(mode, dict):
+        available = ", ".join(sorted(modes)) or "(none)"
+        raise ModeError(f"Unknown mode '{name}'. Available modes: {available}")
+    apps = mode.get("apps")
+    if not isinstance(apps, list) or not apps:
+        raise ModeError(f"Mode '{name}' must contain a non-empty apps list.")
+    return mode
+
+
+def wait_for_new_client(matcher: Any, known_addresses: set[str]) -> dict[str, Any] | None:
+    deadline = time.monotonic() + POLL_SECONDS
+    while time.monotonic() < deadline:
+        client = find_client(matcher, known_addresses)
+        if client is not None:
+            return client
+        time.sleep(POLL_INTERVAL)
+    return None
+
+
+def run_mode(name: str) -> int:
+    mode = load_mode(name)
+    apps = [validate_app(app, index) for index, app in enumerate(mode["apps"])]
+    errors: list[str] = []
+
+    for index, app in enumerate(apps, start=1):
+        try:
+            client = find_client(app["match"])
+            if client is None:
+                before_launch = {str(item.get("address", "")) for item in clients()}
+                print(f"[{name}] launching app {index}: {app['launch']}")
+                dispatch("exec", app["launch"])
+                client = wait_for_new_client(app["match"], before_launch)
+                if client is None:
+                    raise ModeError(
+                        f"Timed out after {POLL_SECONDS:g}s waiting for app {index} to match."
+                    )
+            else:
+                print(f"[{name}] pulling app {index}: {address_of(client)}")
+            place_client(client, app)
+        except ModeError as error:
+            errors.append(f"app {index}: {error}")
+
+    if errors:
+        print(f"workspace-mode {name} finished with errors:", file=sys.stderr)
+        for error in errors:
+            print(f"  - {error}", file=sys.stderr)
+        return 1
+    print(f"workspace-mode {name}: ready")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("name", help="mode name from workspace-modes.json")
+    args = parser.parse_args()
+    try:
+        return run_mode(args.name)
+    except ModeError as error:
+        print(f"workspace-mode: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

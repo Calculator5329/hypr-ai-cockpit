@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "modes": {
+    "coding": {
+      "description": "Editor on monitor 0 and AI chat on monitor 1.",
+      "apps": [
+        {
+          "match": { "class": "^YourEditorClass$" },
+          "launch": "your-editor-command",
+          "monitor": 0,
+          "workspace": 1,
+          "fullscreen": false
+        },
+        {
+          "match": { "class": "^YourAiChatClass$" },
+          "launch": "your-ai-chat-command",
+          "monitor": 1,
+          "workspace": 2,
+          "fullscreen": false
+        }
+      ]
+    },
+    "tv": {
+      "description": "Streaming browser on monitor 0 and chat on monitor 1.",
+      "apps": [
+        {
+          "match": { "class": "^(firefox|Firefox|chromium|Chromium|google-chrome|Google-chrome)$" },
+          "launch": "firefox --new-window https://www.netflix.com",
+          "monitor": 0,
+          "workspace": 3,
+          "fullscreen": true
+        },
+        {
+          "match": { "class": "^YourChatClass$" },
+          "launch": "your-chat-command",
+          "monitor": 1,
+          "workspace": 4,
+          "fullscreen": false
+        }
+      ]
+    },
+    "gaming": {
+      "description": "Game launcher on monitor 0 and video browser on monitor 1.",
+      "apps": [
+        {
+          "match": { "class": "^(steam|Steam)$" },
+          "launch": "steam",
+          "monitor": 0,
+          "workspace": 5,
+          "fullscreen": true
+        },
+        {
+          "match": { "class": "^(firefox|Firefox|chromium|Chromium|google-chrome|Google-chrome)$" },
+          "launch": "firefox --new-window https://www.youtube.com",
+          "monitor": 1,
+          "workspace": 6,
+          "fullscreen": false
+        }
+      ]
+    }
+  }
+}
