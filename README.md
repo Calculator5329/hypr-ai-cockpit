@@ -14,6 +14,8 @@ Desktop, and Cursor.
   `Super+G` GatesAI, `Super+H` Projects Hub, …), a searchable cheat sheet,
   and **Super+scroll** to slide between workspaces.
 - **Projects hub**: register your own projects and jump straight into them.
+- **Workspace modes**: declarative coding, TV, and gaming layouts that pull
+  existing windows into place or launch the missing apps.
 - **AI tooling**: guided install for Claude Desktop, Codex Desktop, Cursor,
   and remote desktop access; GatesAI install + shortcut hookup.
 - **Optional finance module**: ships disabled; bring your own data.
@@ -74,6 +76,7 @@ cd hypr-ai-cockpit
 | [docs/ai-tools.md](docs/ai-tools.md) | Claude Desktop, Codex Desktop, Cursor, remote desktop |
 | [docs/gatesai.md](docs/gatesai.md) | Installing GatesAI and wiring its Super-key shortcut |
 | [docs/projects-hub.md](docs/projects-hub.md) | Registering your own projects and jumping between them |
+| [docs/workspace-modes.md](docs/workspace-modes.md) | Configuring and invoking repeatable coding, TV, and gaming layouts |
 | [docs/finance-optional.md](docs/finance-optional.md) | Enabling the optional finance bar module with your own data |
 | [docs/scrub-checklist.md](docs/scrub-checklist.md) | Contributor checklist: keep personal data out |
 

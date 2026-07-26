@@ -40,6 +40,18 @@ AI cockpit. Finance optional/user-supplied. Visibility flip = Ethan-only.
 - [x] **Scrub gate** (`docs/scrub-checklist.md` + `tests/verify.sh`):
   automated sweep for personal identifiers; must pass before any push.
 
+## Shipped after v1
+
+- [x] **Workspace-mode engine** (`scripts/workspace-mode`,
+  `config/workspace-modes.json`, and `docs/workspace-modes.md`): repeatable
+  coding, TV, and gaming layouts that reuse existing windows and launch
+  missing apps. (Delivered 2026-07-17 in `f4069a5`; Lua-Hyprland
+  compatibility documented in `623495a`.)
+- [x] **Screenshot/asset pipeline design and owner packet**: capture-time
+  privacy invariant, scene manifest, implementation dispatch, and safe
+  owner-only capture procedure. (Approved and delivered 2026-07-19 in
+  `f9b9f7f`; implementation and sanitized captures remain open below.)
+
 ## Next
 
 - [ ] Fresh-VM install test (end-to-end `install.sh` on clean CachyOS).
@@ -48,5 +60,8 @@ AI cockpit. Finance optional/user-supplied. Visibility flip = Ethan-only.
 
 ## Later
 
-- [ ] Screenshot/asset pipeline once Ethan approves captures.
+- [ ] Implement the approved screenshot/asset pipeline documented under
+      `docs/plans/`: land the fail-closed scrub gate, capture the four scenes
+      from a sanitized demo profile, record human-approved hashes, and embed
+      only those approved images.
 - [ ] Non-Arch distro support (Fedora/openSUSE package maps).

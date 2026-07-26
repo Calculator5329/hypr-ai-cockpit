@@ -25,7 +25,7 @@ There are two ways to run it:
 title: "Screenshot asset pipeline — capture/scrub scripts + verify.sh image gate"
 goal: >
   Add the maintainer tooling and fail-closed gate for sanitized desktop
-  screenshots, per the design.md in this task's plan folder (docs/plans/<task-id>/).
+  screenshots, per the design.md in this task's plan folder (docs/plans/<work-id>/).
   (1) scripts/capture-assets.sh: for each scene in the manifest, drive grim
       (region via slurp, single-output via -o) into a GITIGNORED staging dir
       under ${XDG_CACHE_HOME:-$HOME/.cache}/hypr-ai-cockpit-assets/raw/ —

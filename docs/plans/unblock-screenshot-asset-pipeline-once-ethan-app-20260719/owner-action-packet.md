@@ -63,8 +63,11 @@ that has never held personal data. **Not your real desktop.**
 4. **Review each scrubbed image with your own eyes.** Open all four.
    Confirm: no hostname, username, home path, real project name, finance
    data, personal wallpaper, tooltip, or notification is visible in any
-   corner. If one is contaminated, delete it and re-shoot — do **not**
-   try to blur it.
+   corner. If one is contaminated, move it into a private local quarantine
+   outside the repository and re-shoot — do **not** try to blur it or commit
+   it. A suitable durable location is
+   `~/.local/state/hypr-ai-cockpit/rejected-captures/<timestamp>/`; restrict
+   that directory to your user account.
 
 5. **Sign the ledger.** For each image you approved, append one
    tab-separated row to `assets/SCRUB-APPROVED.tsv`:
@@ -85,13 +88,15 @@ prints `Verification passed.`
 
 ## Undo / safety
 
-Fully reversible until commit: raws live in `~/.cache` and can be
-deleted (`rm -rf ~/.cache/hypr-ai-cockpit-assets`); un-embedded PNGs and
-ledger rows can be removed with no trace. Once published to the public
-repo an image is world-readable and effectively permanent — hence the
-demo-profile + eyes-on-every-image gate before that point. If any doubt
-about a capture, discard it; a missing screenshot is harmless (the
-Mermaid diagram still carries the doc), a leaked one is not.
+Fully reversible until commit: raws live in `~/.cache`; move rejected or
+superseded captures into a private local archive such as
+`~/.local/state/hypr-ai-cockpit/rejected-captures/<timestamp>/`. Revert
+uncommitted ledger rows and move unembedded PNGs into the same archive rather
+than permanently deleting them. Once published to the public repo an image is
+world-readable and effectively permanent — hence the demo-profile +
+eyes-on-every-image gate before that point. If any doubt about a capture,
+quarantine it; a missing screenshot is harmless (the Mermaid diagram still
+carries the doc), a leaked one is not.
 
 ## What to return so automation resumes
 

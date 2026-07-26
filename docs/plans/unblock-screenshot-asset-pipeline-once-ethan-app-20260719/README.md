@@ -4,7 +4,7 @@ Deliverable for roadmap "Later" item **"Screenshot/asset pipeline once
 Ethan approves captures."** (`docs/roadmap.md`). Ethan's decision:
 **APPROVED** (2026-07-19).
 
-This lane owns only this plan folder (`docs/plans/<this-task-id>/`).
+This lane owns only this plan folder (`docs/plans/<this-work-id>/`).
 It produces the plan; it does not touch source or the roadmap. The
 harvesting session ticks the roadmap item from these deliverables.
 

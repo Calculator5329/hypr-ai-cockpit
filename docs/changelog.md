@@ -1,5 +1,16 @@
 # Changelog
 
+- 2026-07-26 — Reconciled the public README and roadmap with the shipped
+  workspace-mode engine (`f4069a5`, `623495a`) and the approved screenshot
+  pipeline plan (`f9b9f7f`). Replaced destructive rejected-capture guidance
+  with a private archive/quarantine procedure; pipeline implementation and
+  sanitized captures remain explicitly open.
+- 2026-07-19 — Screenshot/asset pipeline design approved and documented:
+  privacy invariant, scene manifest, implementation dispatch, and owner-only
+  sanitized capture packet (`f9b9f7f`).
+- 2026-07-17 — Added a declarative workspace-mode engine for repeatable
+  coding, TV, and gaming layouts (`f4069a5`), with Lua-Hyprland compatibility
+  guidance (`623495a`).
 - 2026-07-16 — Repo scaffolded (README, CLAUDE.md, roadmap seeded from
   owner spec, intent recorded in ai-cockpit-setup docs/intent.md).
 - 2026-07-16 — v1 public package complete: core configs + toolbar ported
