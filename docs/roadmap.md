@@ -55,8 +55,9 @@ AI cockpit. Finance optional/user-supplied. Visibility flip = Ethan-only.
 ## Next
 
 - [ ] Fresh-VM install test (end-to-end `install.sh` on clean CachyOS).
-- [ ] [ETHAN] Flip repo public + announce (visibility change is
-  owner-only).
+- [x] [ETHAN] Flip repo public + announce (visibility change is
+  owner-only). *(decided 2026-08-01, packet lab brief2: idea dropped — repo
+  stays private, no pre-publication sweep needed)*
 
 ## Later
 
