@@ -6,7 +6,7 @@ truth. Its model is deliberately simple:
 ```text
 project manifest  ──► hub list / summaries / filters
        │
-       └────────────► desktop project launcher (Super+P)
+       └────────────► Project Hub view (Super+P)
 ```
 
 Keep a single project manifest and derive both the hub list and launcher
@@ -71,7 +71,7 @@ published.
 
 ## 3. Jump from the desktop
 
-`Super+P` is the project-launcher chord. Configure your launcher with a short
+`Super+P` opens the Project Hub (D1 ruling, 2026-08-16; the launcher idea below has no chord until it separately earns one). Configure your launcher with a short
 key and the same project directory used in the manifest. For example, a
 launcher-specific registry could contain:
 
@@ -80,11 +80,11 @@ launcher-specific registry could contain:
 path = "~/Projects/tools/recipe-planner"
 ```
 
-After registering it, press `Super+P`, search for `recipe-planner`, and open
+After registering it, open your launcher, search for `recipe-planner`, and open
 it. A launcher may start a terminal, editor, or persistent terminal session;
 choose the behavior you prefer, but keep it scoped to the registered project.
 
-The optional `Super+H` cockpit view opens the web-based Projects Hub. From
+The `Super+P` cockpit view opens the web-based Projects Hub (formerly documented on `Super+H`; superseded by the 2026-07-12 owner ruling). From
 there, select a project to read its summary, open a verified local preview,
 or request a desktop lane if your hub supports it.
 

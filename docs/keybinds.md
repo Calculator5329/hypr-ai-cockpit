@@ -34,8 +34,7 @@ two is shipped: see the table rows below.)
 | `Super+C` | Open Claude Desktop (when installed) | **NOT SHIPPED** |
 | `Super+E` | Open the file manager | yes |
 | `Super+G` | Summon GatesAI Chat (when configured) | **NOT SHIPPED** |
-| `Super+H` | Open the Projects Hub (when configured) | **NOT SHIPPED** |
-| `Super+P` | Choose a registered project / terminal session | **NOT SHIPPED** |
+| `Super+P` | Open the Project Hub (when configured) | **NOT SHIPPED** here — live on Ethan's box via `~/.config/hypr/lua/views.lua` (`project-hub.toggle super-p`) |
 | `Super+Q` | Close the focused window | yes |
 | `Super+V` | Search clipboard history | **CONFLICT** — bound to *toggle floating* |
 | `Super+Scroll` | Slide to the next or previous existing workspace | yes |
@@ -146,7 +145,14 @@ searchable hint so an existing action is not silently replaced. The searchable
 hint is itself unshipped as of 2026-08-13, so until it exists the only complete
 list is `config/hypr/config/keybinds.conf` and the `Shipped?` column above.
 
-Application-oriented keys (`C`, `G`, `H`, and `P`) intentionally depend on
+**Keybind ruling, 2026-08-16 (D1, archive-harvest packet 20260812).**
+`Super+P` owns the Project Hub — the live registry and Ethan's 2026-07-12
+ruling ("windows H should instead be windows P") agree. Every `Super+H`
+Projects-Hub reference in this repo is stale and was reconciled this date;
+the old terminal project launcher gets a chord only if it separately earns
+one, via the owner-gated global-keybind path.
+
+Application-oriented keys (`C`, `G`, and `P`) intentionally depend on
 the optional tools being installed and configured. Their setup guides explain
 the matching launch command. Note that this paragraph explains why they might
 not *work*; measured 2026-08-13 they are not *bound* either, with or without

@@ -11,7 +11,7 @@ Desktop, and Cursor.
   widget, and a top-right indicator of actively running localhost servers —
   click one to open it in your browser.
 - **Super-key workflow**: a memorable chord scheme (`Super+C` Claude,
-  `Super+G` GatesAI, `Super+H` Projects Hub, …), a searchable cheat sheet,
+  `Super+G` GatesAI, `Super+P` Projects Hub, …), a searchable cheat sheet,
   and **Super+scroll** to slide between workspaces.
 - **Projects hub**: register your own projects and jump straight into them.
 - **Workspace modes**: declarative coding, TV, and gaming layouts that pull
@@ -47,7 +47,7 @@ flowchart LR
     W1[Workspace 1] <-- "Super+scroll" --> W2[Workspace 2] <-- "Super+scroll" --> W3[Workspace 3]
     W2 -- "Super+C" --> M1[Claude Desktop]
     W2 -- "Super+G" --> M2[GatesAI chat]
-    W2 -- "Super+H" --> M3[Projects hub]
+    W2 -- "Super+P" --> M3[Projects hub]
     M1 & M2 & M3 -- "Super+Q closes" --> W2
 ```
 
