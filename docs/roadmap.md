@@ -59,6 +59,14 @@ AI cockpit. Finance optional/user-supplied. Visibility flip = Ethan-only.
   owner-only). *(decided 2026-08-01, packet lab brief2: idea dropped — repo
   stays private, no pre-publication sweep needed)*
 
+- [ ] **Cockpit notify bus, phase 1**: `cockpit-notify` CLI + action registry +
+      ledger + D-Bus monitor for Claude/Codex/Chrome + Claude Code hooks; jarvis,
+      dictate and context-capture migrated. Plan: `docs/plans/cockpit-notify-bus-20260908.md`.
+- [ ] **Cockpit notify bus, phase 2**: quickshell card renderer (info / progress /
+      done / fail / ask), history drawer, modes; mako archived.
+- [ ] **Cockpit notify bus, phase 3**: orchestrator asks and Forge packets as
+      `ask` cards answered from the card; ledger replay after reboot.
+
 ## Later
 
 - [ ] <!-- workspace:id=work:ba65232d-e7e4-5dfa-823c-5eedd9011b7e --> Implement the approved screenshot/asset pipeline documented under

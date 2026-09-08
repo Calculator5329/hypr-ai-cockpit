@@ -1,12 +1,98 @@
-max-visible=10
-layer=top
-font=Noto Sans 10
-background-color=#131a22dd
-text-color=#e7e9ee
-border-color=#3ecf8e
-border-radius=8
-max-icon-size=48
-default-timeout=10000
+# Cockpit notifications (2026-09-08). One look per source, colours from hypr/lua/vars.lua.
+# Modes (Super+Shift+N cycles, `notify-mode <name>` sets): default = everything,
+# ai = only Claude / Codex / Jarvis / critical, dnd = only critical. History keeps everything:
+# `makoctl restore` brings the last one back, `makoctl history` lists them.
+font=Fira Sans 11
+background-color=#111826f2
+text-color=#dddddd
+border-color=#182545
+border-size=2
+border-radius=4
+padding=10,14
+margin=8
+outer-margin=14
+width=440
+height=240
+max-icon-size=40
+icon-location=left
+markup=1
+actions=1
+format=<b>%s</b>\n%b
+default-timeout=8000
+max-visible=6
+max-history=50
+sort=-time
+group-by=app-name
+output=DP-1
 anchor=top-right
-margin=20
+layer=top
+on-button-left=invoke-default-action
+on-button-right=dismiss
+on-button-middle=dismiss-all
+on-touch=dismiss
 
+[grouped]
+format=<b>%s</b> <span color="#798bb2">×%g</span>\n%b
+
+# ── sources ──────────────────────────────────────────────────────────────
+[app-name=Claude]
+border-color=#82dccc
+format=<span color="#82dccc" weight="bold">Claude</span>  <b>%s</b>\n%b
+default-timeout=15000
+
+[app-name=Codex]
+border-color=#01ccff
+format=<span color="#01ccff" weight="bold">Codex</span>  <b>%s</b>\n%b
+default-timeout=15000
+
+[app-name=ChatGPT]
+border-color=#01ccff
+format=<span color="#01ccff" weight="bold">ChatGPT</span>  <b>%s</b>\n%b
+default-timeout=15000
+
+# Jarvis talks from the bottom of the primary screen, close to where the eyes are during a command
+[app-name=Jarvis]
+anchor=bottom-center
+width=560
+border-color=#00aa84
+format=<b>%s</b>\n%b
+default-timeout=5000
+
+[app-name=notify-mode]
+anchor=bottom-center
+border-color=#798bb2
+default-timeout=2500
+
+# ── urgency ──────────────────────────────────────────────────────────────
+[urgency=low]
+text-color=#9fb0d0
+default-timeout=4000
+
+[urgency=critical]
+background-color=#2a1119f2
+border-color=#ff5555
+default-timeout=0
+ignore-timeout=1
+
+# ── modes ────────────────────────────────────────────────────────────────
+[mode=ai]
+invisible=1
+[mode=ai app-name=Claude]
+invisible=0
+[mode=ai app-name=Codex]
+invisible=0
+[mode=ai app-name=ChatGPT]
+invisible=0
+[mode=ai app-name=Jarvis]
+invisible=0
+[mode=ai app-name=notify-mode]
+invisible=0
+[mode=ai urgency=critical]
+invisible=0
+
+[mode=dnd]
+invisible=1
+[mode=dnd urgency=critical]
+invisible=0
+[mode=dnd app-name=notify-mode]
+invisible=0
