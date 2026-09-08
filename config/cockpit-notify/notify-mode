@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# notify-mode [all|ai|dnd|next]: switch the cockpit notification mode.
+#   all      everything        ai   only Claude / Codex / Jarvis / critical      dnd  only critical
+#   next     cycle all -> ai -> dnd -> all
+# Talks to cockpit-notifyd; falls back to makoctl modes when mako is the daemon.
+set -euo pipefail
+have_cockpit() { busctl --user status org.freedesktop.Notifications 2>/dev/null | grep -q cockpit-notifyd; }
+mode_file="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/cockpit-notify/mode"
+cur=$(cat "$mode_file" 2>/dev/null || true)
+[ -z "$cur" ] && cur=all
+case "${1:-next}" in
+  default|all) new=all ;;
+  ai|dnd) new=$1 ;;
+  next) case "$cur" in all) new=ai ;; ai) new=dnd ;; *) new=all ;; esac ;;
+  *) echo "usage: notify-mode [all|ai|dnd|next]" >&2; exit 2 ;;
+esac
+if have_cockpit; then
+  cockpit-notify --mode "$new" >/dev/null
+else
+  makoctl mode -r default -r ai -r dnd >/dev/null
+  [ "$new" = all ] || makoctl mode -a "$new" >/dev/null
+  notify-send -a notify-mode -t 2500 "🔔 $new" "$new"
+fi
+command -v cockpit-track >/dev/null && cockpit-track "notify-mode.$new" || true
+echo "$new"

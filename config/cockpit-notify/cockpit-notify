@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""cockpit-notify: send a structured card to the cockpit notification bus.
+
+  cockpit-notify --source claude-code --kind done --title "Session finished" --body "3 files, tests green"
+  cockpit-notify --kind progress --progress 60 --group lane:faces-ui --title "faces-ui: tests"
+  cockpit-notify --title "Lane timings" --kv "parse=12 ms" --kv "llm=980 ms" --kv "total=1.2 s"
+  cockpit-notify --title "Requests / min" --series 3,5,8,13,21,34 --series-label "last 6 minutes"
+  cockpit-notify --title "Screenshot" --image /path/shot.png --link http://localhost:5173/packets
+  cockpit-notify --title "Failing test" --kind fail --code-file /path/trace.txt
+  cockpit-notify --title "Changed" --list "jarvis: aliases" --list "mako: modes"
+  cockpit-notify --json < card.json     same fields: source kind title body icon image link focus group
+                                        progress kv (dict or [[k,v]]) series series_label code list urgency timeout
+  cockpit-notify --mode ai|all|dnd      switch mode      --dismiss-all    clear the screen
+  cockpit-notify --theme cachy|forged|ink|terminal         switch the card skin, live
+  cockpit-notify --history [N]          print the last N ledger rows (default 20)
+
+Kinds: info, progress, done, fail. A card never asks for anything: left click focuses
+the source app (or opens --link), right click dismisses, middle click clears all.
+Works with mako too (it ignores the x-cockpit hints and shows title + body).
+"""
+import argparse
+import json
+import os
+import sys
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+BUS_NAME, PATH = "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
+LEDGER_DIR = os.path.expanduser("~/.local/state/cockpit-metrics")
+
+
+def history(n: int) -> int:
+    files = sorted(f for f in os.listdir(LEDGER_DIR) if f.startswith("notify-")) if os.path.isdir(LEDGER_DIR) else []
+    rows = []
+    for f in files[-2:]:
+        for ln in open(os.path.join(LEDGER_DIR, f)):
+            try:
+                r = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            if r.get("event") == "notify":
+                rows.append(r)
+    for r in rows[-n:]:
+        flag = "" if r.get("shown", True) else "  (hidden)"
+        print(f"{r['ts'][11:16]}  {r['source']:<12} {r['kind']:<8} {r['title']}{flag}")
+        if r.get("body"):
+            print(f"       {r['body'][:110]}")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--source", default="cockpit")
+    ap.add_argument("--kind", default="info", choices=["info", "progress", "done", "fail"])
+    ap.add_argument("--title", default="")
+    ap.add_argument("--body", default="")
+    ap.add_argument("--icon", default="", help="icon theme name or image path")
+    ap.add_argument("--image", default="", help="picture shown in the card (path)")
+    ap.add_argument("--link", default="", help="URL opened on click")
+    ap.add_argument("--focus", default="", help="window class focused on click")
+    ap.add_argument("--group", default="", help="replace key: a new card in this group replaces the old one")
+    ap.add_argument("--progress", type=int)
+    ap.add_argument("--kv", action="append", default=[], help="key=value, repeatable")
+    ap.add_argument("--series", default="", help="comma separated numbers")
+    ap.add_argument("--series-label", default="")
+    ap.add_argument("--code", default="")
+    ap.add_argument("--code-file", default="")
+    ap.add_argument("--list", action="append", default=[], dest="items", help="bullet item, repeatable")
+    ap.add_argument("--urgency", default="normal", choices=["low", "normal", "critical"])
+    ap.add_argument("--timeout", type=int, default=-1, help="ms; 0 = stay")
+    ap.add_argument("--replace", type=int, default=0)
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--history", nargs="?", const=20, type=int)
+    ap.add_argument("--mode", choices=["all", "ai", "dnd"])
+    ap.add_argument("--theme", choices=["cachy", "forged", "ink", "terminal"])
+    ap.add_argument("--dismiss-all", action="store_true")
+    ap.add_argument("-h", "--help", action="store_true")
+    a = ap.parse_args()
+    if a.help:
+        print(__doc__)
+        return 0
+    if a.history is not None:
+        return history(a.history)
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+    def call(iface, method, sig, *vals):
+        return bus.call_sync(BUS_NAME, PATH, iface, method, GLib.Variant(sig, vals) if sig else None,
+                             None, Gio.DBusCallFlags.NONE, 5000, None)
+
+    if a.mode or a.dismiss_all or a.theme:
+        try:
+            call("org.cockpit.Notify", "GetMode", "")
+        except GLib.GError:
+            print("cockpit-notify: cockpit-notifyd is not the notification daemon (mako?)", file=sys.stderr)
+            return 3
+        if a.mode:
+            print(call("org.cockpit.Notify", "SetMode", "(s)", a.mode).unpack()[0])
+        if a.dismiss_all:
+            call("org.cockpit.Notify", "DismissAll", "")
+        if a.theme:
+            print(call("org.cockpit.Notify", "SetTheme", "(s)", a.theme).unpack()[0])
+        return 0
+    kv = [p.partition("=")[::2] for p in a.kv if "=" in p]
+    series = [float(x) for x in a.series.split(",") if x.strip()] if a.series else []
+    code = open(a.code_file).read() if a.code_file else a.code
+    items = list(a.items)
+    if a.json:
+        d = json.load(sys.stdin)
+        for k in ("source", "kind", "title", "body", "icon", "image", "link", "focus", "group", "urgency"):
+            if k in d:
+                setattr(a, k, str(d[k]))
+        if "timeout" in d:
+            a.timeout = int(d["timeout"])
+        if "progress" in d:
+            a.progress = int(d["progress"])
+        if "kv" in d:
+            kv = list(d["kv"].items()) if isinstance(d["kv"], dict) else [list(p)[:2] for p in d["kv"]]
+        if "series" in d:
+            series = [float(x) for x in d["series"]]
+        if "series_label" in d:
+            a.series_label = str(d["series_label"])
+        if "code" in d:
+            code = str(d["code"])
+        if "list" in d:
+            items = [str(x) for x in d["list"]]
+    if not a.title and not a.body:
+        print("cockpit-notify: --title or --body is required", file=sys.stderr)
+        return 2
+    hints = {
+        "x-cockpit-kind": GLib.Variant("s", a.kind),
+        "urgency": GLib.Variant("y", {"low": 0, "normal": 1, "critical": 2}[a.urgency]),
+    }
+    for key, val in (("x-cockpit-icon", a.icon), ("image-path", os.path.abspath(a.image) if a.image else ""),
+                     ("x-cockpit-link", a.link), ("x-cockpit-focus", a.focus), ("x-cockpit-group", a.group),
+                     ("x-cockpit-series-label", a.series_label), ("x-cockpit-code", code)):
+        if val:
+            hints[key] = GLib.Variant("s", val)
+    if a.progress is not None:
+        hints["value"] = GLib.Variant("i", a.progress)
+    if kv:
+        hints["x-cockpit-kv"] = GLib.Variant("s", json.dumps([[str(k), str(v)] for k, v in kv]))
+    if series:
+        hints["x-cockpit-series"] = GLib.Variant("s", json.dumps(series))
+    if items:
+        hints["x-cockpit-list"] = GLib.Variant("s", json.dumps(items))
+    ret = call(BUS_NAME, "Notify", "(susssasa{sv}i)", a.source, a.replace, a.icon, a.title, a.body, [], hints, a.timeout)
+    print(int(ret.unpack()[0]))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

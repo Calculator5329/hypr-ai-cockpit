@@ -59,13 +59,24 @@ AI cockpit. Finance optional/user-supplied. Visibility flip = Ethan-only.
   owner-only). *(decided 2026-08-01, packet lab brief2: idea dropped — repo
   stays private, no pre-publication sweep needed)*
 
-- [ ] **Cockpit notify bus, phase 1**: `cockpit-notify` CLI + action registry +
-      ledger + D-Bus monitor for Claude/Codex/Chrome + Claude Code hooks; jarvis,
-      dictate and context-capture migrated. Plan: `docs/plans/cockpit-notify-bus-20260908.md`.
-- [ ] **Cockpit notify bus, phase 2**: quickshell card renderer (info / progress /
-      done / fail / ask), history drawer, modes; mako archived.
-- [ ] **Cockpit notify bus, phase 3**: orchestrator asks and Forge packets as
-      `ask` cards answered from the card; ledger replay after reboot.
+- [x] **Cockpit notify bus, phase 1** (2026-09-08): `cockpit-notify` CLI, ledger
+      (`~/.local/state/cockpit-metrics/notify-YYYY-MM.jsonl`), Claude Code
+      Notification/Stop hooks. The daemon owns `org.freedesktop.Notifications`
+      itself, so no D-Bus monitor was needed. The action registry was cut the same
+      day by owner ruling ("I shouldn't have to respond to anything through
+      notifications"): a card has no buttons, a click focuses the source app or
+      opens its link. Plan: `docs/plans/cockpit-notify-bus-20260908.md`.
+- [x] **Cockpit notify bus, phase 2** (2026-09-08): renderer is GTK3 +
+      gtk-layer-shell in `cockpit-notifyd` (quickshell is not installed; zero new
+      packages). Kinds info / progress / done / fail; payloads picture, key/value,
+      series chart, list, mono block; app icons with tinted stroke glyphs for
+      generic sources; four live-switchable skins, `ink` chosen by Ethan; modes
+      all / ai / dnd. mako archived (`config/mako/` kept for reference). The
+      history drawer was built and then removed under the same ruling; history is
+      `cockpit-notify --history` on the ledger.
+- ~~**Cockpit notify bus, phase 3**: asks answered from cards~~ retired
+      2026-09-08 by owner ruling; asks stay in the Forge inbox. Ledger replay
+      after reboot is not wanted either: cards are transient by design.
 
 ## Later
 

@@ -1,5 +1,16 @@
 # Changelog
 
+- 2026-09-08 — `cockpit-notifyd` replaces mako as the notification daemon
+  (`config/cockpit-notify/`). GTK3 + gtk-layer-shell, Gio GDBus (python-dbus is
+  not installed). Every notification is ledgered; cards show the app's icon (the
+  forged set for Claude, Codex, Chrome, Cursor; tinted visions stroke glyphs for
+  cockpit / orchestrator / forge), and carry progress, picture, key/value, series
+  chart, list or mono-block payloads via `x-cockpit-*` hints from the
+  `cockpit-notify` CLI. Four skins; `ink` is the default (Ethan's pick from a
+  four-way screenshot). Owner ruling the same day: no inbox, no buttons, nothing
+  answered from a card; the drawer and action registry built earlier in the day
+  were removed. Claude Code Notification/Stop hooks post cards.
+
 
 - 2026-08-13 — Tagged `docs/keybinds.md` against the shipped config, per owner
   ruling S4 `q-batch-notes` = `notes_and_fix` (`doc-truth-packet-20260812`,

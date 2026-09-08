@@ -1,0 +1,819 @@
+#!/usr/bin/env python3
+"""cockpit-notifyd: the cockpit notification server (replaces mako, 2026-09-08).
+
+Owns org.freedesktop.Notifications on the session bus, so everything (Claude,
+Codex, Chrome, notify-send, cockpit-notify) lands here. Every notification is
+appended to ~/.local/state/cockpit-metrics/notify-YYYY-MM.jsonl whether or not
+it was shown. Cards are transient and never ask for anything: a click focuses
+the source app or opens the card's link, right click dismisses, middle click
+clears the screen. There is no inbox and no drawer (owner ruling, 2026-09-08:
+"I shouldn't have to respond to anything through notifications").
+
+Card anatomy: an icon (the app's own icon when it sends one, else the source's
+icon, else a kind glyph), a bold title, a body, and any of the rich payloads:
+
+  value              progress bar (the standard hint), replaced in place by group
+  image-path         a picture (screenshot, render, chart), up to 400x300
+  x-cockpit-kv       key/value grid          JSON [[k, v], ...]
+  x-cockpit-series   bar chart / sparkline   JSON [n, n, ...]
+  x-cockpit-code     monospace block         string
+  x-cockpit-list     bullet list             JSON [s, ...]
+  x-cockpit-icon     icon override           theme name or path
+  x-cockpit-kind     info | progress | done | fail   (colours the rail)
+  x-cockpit-link     URL opened on click
+  x-cockpit-focus    window class focused on click
+  x-cockpit-group    replace key: a new card in the same group replaces the old one
+
+Modes: all / ai / dnd (file $XDG_RUNTIME_DIR/cockpit-notify/mode, or SetMode on
+org.cockpit.Notify). Hidden cards are still ledgered.
+
+Zero new packages: python-gobject (GTK3, Gio GDBus, cairo) + gtk-layer-shell.
+"""
+from __future__ import annotations
+
+import html
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GtkLayerShell", "0.1")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, GtkLayerShell, Pango  # noqa: E402
+
+HOME = Path.home()
+RUN = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "cockpit-notify"
+LOG_DIR = HOME / ".local" / "state" / "cockpit-metrics"
+CHROME = str(HOME / ".local" / "bin" / "chrome-open")
+PRIMARY_X = 0                      # the Acer sits at x=0; cards live there
+MAX_VISIBLE = 6
+CARD_W = 440
+PIC_W, PIC_H = 400, 300
+MODES = ("all", "ai", "dnd")
+AI_SOURCES = {"claude", "codex", "chatgpt", "jarvis", "claude-code", "orchestrator", "forge", "notify-mode", "cockpit"}
+
+# Themes. Flat colour only (no gradients, no glass, no rounded-everything: the design blacklist).
+# The active theme is the name in ~/.config/cockpit-notify/theme; `cockpit-notify --theme NAME` switches live.
+SRC_COLOURS = {
+    "claude": "#82dccc", "claude-code": "#82dccc", "codex": "#01ccff", "chatgpt": "#01ccff",
+    "jarvis": "#00aa84", "orchestrator": "#c9a86a", "forge": "#c9a86a", "notify-mode": "#798bb2",
+}
+THEMES = {
+    # the cachy palette from ~/.config/hypr/lua/vars.lua; Fira Sans; soft 4px corners; coloured rail
+    "cachy": dict(bg="#111826", bg_fail="#2a1119", text="#dddddd", muted="#9fb0d0", border="#2a3654", code_bg="#0b1120",
+                  radius=4, rail=4, font="Fira Sans", title_font="Fira Sans", title_weight="bold", title_size="11pt",
+                  body_size="10.5pt", mono="JetBrainsMono Nerd Font", fail="#ff5555", done="#82dccc", progress="#00aa84",
+                  chart=(0.0, 0.667, 0.518), chart_last=(0.51, 0.86, 0.80), rail_default="#182545", **SRC_COLOURS),
+    # near-black, square, thin border, humanist sans; quieter accents, the rail is a 2px hairline
+    "ink": dict(bg="#0b0d11", bg_fail="#1d0f12", text="#e6e6e6", muted="#8a919c", border="#262b34", code_bg="#05070a",
+                radius=0, rail=2, font="Adwaita Sans", title_font="Adwaita Sans", title_weight="600", title_size="11pt",
+                body_size="10.5pt", mono="Hack", fail="#e5484d", done="#7fd1b9", progress="#7fd1b9",
+                chart=(0.36, 0.42, 0.50), chart_last=(0.90, 0.90, 0.90), rail_default="#262b34",
+                claude="#a3d9cd", **{"claude-code": "#a3d9cd"}, codex="#7cc7e8", chatgpt="#7cc7e8", jarvis="#7fd1b9",
+                orchestrator="#c8b08a", forge="#c8b08a", **{"notify-mode": "#8a919c"}),
+    # everything monospace, green on graphite, square; reads like a status line that grew a picture slot
+    "terminal": dict(bg="#0d1117", bg_fail="#210d0d", text="#c9d1d9", muted="#6e7681", border="#1f3d2e", code_bg="#010409",
+                     radius=0, rail=3, font="JetBrainsMono Nerd Font", title_font="JetBrainsMono Nerd Font", title_weight="bold",
+                     title_size="10pt", body_size="9.5pt", mono="JetBrainsMono Nerd Font", fail="#f85149", done="#3fb950", progress="#3fb950",
+                     chart=(0.25, 0.69, 0.31), chart_last=(0.85, 0.95, 0.60), rail_default="#1f3d2e",
+                     claude="#56d4bf", **{"claude-code": "#56d4bf"}, codex="#58a6ff", chatgpt="#58a6ff", jarvis="#3fb950",
+                     orchestrator="#d29922", forge="#d29922", **{"notify-mode": "#6e7681"}),
+    # charcoal with forest green, the register of the forged app icons (dark faceted metal, green emissive);
+    # the acid green is reserved for the one highlight (newest bar, counts), never for surfaces
+    "forged": dict(bg="#0e1411", bg_fail="#241214", text="#dfe6df", muted="#8ca392", border="#24352b", code_bg="#080c0a",
+                   radius=3, rail=4, font="Fira Sans", title_font="Fira Sans SemiBold", title_weight="600", title_size="11pt",
+                   body_size="10.5pt", mono="JetBrainsMono Nerd Font", fail="#e05a4f", done="#6fbf8a", progress="#3fae6c",
+                   chart=(0.18, 0.56, 0.36), chart_last=(0.49, 0.88, 0.06), rail_default="#2f5a42",
+                   claude="#6fbf8a", **{"claude-code": "#6fbf8a"}, codex="#4fa87a", chatgpt="#4fa87a", jarvis="#7ee00f",
+                   orchestrator="#9ad7ac", forge="#9ad7ac", **{"notify-mode": "#8ca392"}),
+}
+THEME_FILE = HOME / ".config" / "cockpit-notify" / "theme"
+
+
+def read_theme() -> str:
+    try:
+        t = THEME_FILE.read_text().strip()
+        return t if t in THEMES else "ink"
+    except OSError:
+        return "ink"          # Ethan's pick, 2026-09-08 ("3rd looks best to me")
+
+
+C = dict(THEMES[read_theme()])
+
+
+def css_for(t: dict) -> str:
+    return f"""
+window {{ background: transparent; }}
+.card {{ background-color: {t['bg']}; border-radius: {t['radius']}px; border: 1px solid {t['border']}; }}
+.card.fail {{ background-color: {t['bg_fail']}; }}
+.rail {{ min-width: {t['rail']}px; border-radius: {t['radius']}px 0 0 {t['radius']}px; }}
+.title {{ color: {t['text']}; font-family: "{t['title_font']}"; font-weight: {t['title_weight']}; font-size: {t['title_size']}; }}
+.source {{ font-weight: bold; font-size: 9.5pt; }}
+.body {{ color: {t['text']}; font-size: {t['body_size']}; }}
+.meta {{ color: {t['muted']}; font-size: 9pt; }}
+.count {{ color: {t['muted']}; font-size: 9.5pt; }}
+.kv-k {{ color: {t['muted']}; font-size: 9.5pt; }}
+.kv-v {{ color: {t['text']}; font-size: 10pt; }}
+.code {{ color: {t['text']}; font-family: "{t['mono']}"; font-size: 9pt; background-color: {t['code_bg']};
+         border-radius: {min(t['radius'], 3)}px; padding: 6px 8px; }}
+.pic {{ border-radius: {min(t['radius'], 3)}px; }}
+progressbar trough {{ background-color: {t['border']}; border: none; min-height: 6px; }}
+progressbar progress {{ background-color: {t['progress']}; border: none; min-height: 6px; }}
+* {{ font-family: "{t['font']}"; }}
+"""
+
+
+# source -> (icon theme name, window class to focus on click)
+SOURCE_ICON = {
+    "claude": ("claude", "com.anthropic.Claude"), "claude-code": ("claude", "com.anthropic.Claude"),
+    "codex": ("chatgpt", "ChatGPT"), "chatgpt": ("chatgpt", "ChatGPT"),
+    "jarvis": ("audio-input-microphone", ""), "cockpit": ("dialog-information", ""),
+    "orchestrator": ("system-run", ""), "forge": ("system-run", ""), "notify-mode": ("preferences-desktop-notification", ""),
+    "google-chrome": ("google-chrome", "google-chrome"), "chrome": ("google-chrome", "google-chrome"),
+    "firefox": ("firefox", "firefox"), "obsidian": ("obsidian", "obsidian"), "cursor": ("cursor", "Cursor"),
+    "discord": ("discord", "discord"),
+}
+GLYPH_DIR = HOME / ".local" / "share" / "cockpit-notify" / "glyphs"   # the visions 24px stroke set, tinted per theme
+KIND_GLYPH = {"fail": "blocked", "done": "done", "progress": "in-progress", "info": "status-ready"}
+PAYLOAD_GLYPH = [("series", "graph"), ("picture", "preview"), ("code", "evidence"), ("list", "item-task"), ("kv", "receipt")]
+SOURCE_GLYPH = {"orchestrator": "lane-run", "forge": "packet", "cockpit": "inbox", "notify-mode": "decision"}
+_GLYPHS: dict = {}
+
+
+def glyph(name: str, colour: str, size: int = 36):
+    """Render one stroke glyph in a theme colour (SVG uses currentColor)."""
+    key = (name, colour, size)
+    if key in _GLYPHS:
+        return _GLYPHS[key]
+    pb = None
+    try:
+        svg = (GLYPH_DIR / f"{name}.svg").read_text().replace("currentColor", colour)
+        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+        loader.set_size(size, size)
+        loader.write(svg.encode())
+        loader.close()
+        pb = loader.get_pixbuf()
+    except Exception:
+        pb = None
+    _GLYPHS[key] = pb
+    return pb
+
+
+def now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def ledger_append(rec: dict) -> None:
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(LOG_DIR / time.strftime("notify-%Y-%m.jsonl"), "a") as f:
+            f.write(json.dumps({"ts": now_iso(), **rec}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def read_mode() -> str:
+    try:
+        m = (RUN / "mode").read_text().strip()
+        return m if m in MODES else "all"
+    except OSError:
+        return "all"
+
+
+def write_mode(m: str) -> None:
+    RUN.mkdir(parents=True, exist_ok=True)
+    (RUN / "mode").write_text(m)
+
+
+def norm_source(app_name: str) -> str:
+    a = (app_name or "").strip().lower()
+    return {"notify-send": "cockpit", "": "cockpit"}.get(a, a)
+
+
+def esc(s: str) -> str:
+    return html.escape(s or "", quote=False)
+
+
+def safe_markup(s: str) -> str:
+    """Body may carry pango-ish markup from libnotify clients; keep it if it parses, else escape."""
+    try:
+        Pango.parse_markup(s, -1, "\0")
+        return s
+    except Exception:
+        return esc(s)
+
+
+def spawn(argv: list[str]) -> None:
+    subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                     start_new_session=True, close_fds=True)
+
+
+def hypr(lua: str) -> None:
+    spawn(["hyprctl", "dispatch", lua])
+
+
+def lua_str(s: str) -> str:
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def jload(s, default):
+    try:
+        return json.loads(s) if isinstance(s, str) else (s if s is not None else default)
+    except (json.JSONDecodeError, TypeError):
+        return default
+
+
+# ---------------------------------------------------------------- pixbufs
+
+def pixbuf_from_hint(h: dict, size: int | None):
+    """image-data (raw RGB(A) rows) or image-path, scaled to `size` square or to the picture box."""
+    try:
+        data = h.get("image-data") or h.get("image_data") or h.get("icon_data")
+        if data:
+            w, hh, rs, alpha, bps, ch, raw = data
+            pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(raw)), GdkPixbuf.Colorspace.RGB, bool(alpha), int(bps), int(w), int(hh), int(rs))
+            return fit(pb, size)
+        path = str(h.get("image-path", "") or h.get("image_path", ""))
+        return pixbuf_from_path(path, size)
+    except Exception:
+        return None
+
+
+def pixbuf_from_path(path: str, size: int | None):
+    try:
+        if path.startswith("file://"):
+            path = path[7:]
+        if path and os.path.isabs(path) and os.path.exists(path):
+            if size:
+                return GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+            return fit(GdkPixbuf.Pixbuf.new_from_file(path), None)
+    except Exception:
+        pass
+    return None
+
+
+def fit(pb, size: int | None):
+    if size:
+        return pb.scale_simple(size, size, GdkPixbuf.InterpType.BILINEAR)
+    w, h = pb.get_width(), pb.get_height()
+    k = min(PIC_W / w, PIC_H / h, 1.0)
+    return pb.scale_simple(max(1, int(w * k)), max(1, int(h * k)), GdkPixbuf.InterpType.BILINEAR) if k < 1 else pb
+
+
+def theme_icon(name: str, size: int):
+    try:
+        theme = Gtk.IconTheme.get_default()
+        if name and theme.has_icon(name):
+            return theme.load_icon(name, size, Gtk.IconLookupFlags.FORCE_SIZE)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_icon(n: dict, app_icon: str, h: dict):
+    """Order: x-cockpit-icon, the app's own icon argument, a small image-data, the source's icon, the kind glyph."""
+    size = 36
+    for cand in (str(h.get("x-cockpit-icon", "")), app_icon):
+        if not cand:
+            continue
+        pb = pixbuf_from_path(cand, size) or theme_icon(cand, size)
+        if pb:
+            return pb
+    if h.get("image-data") and not h.get("x-cockpit-image-is-picture"):
+        pb = pixbuf_from_hint(h, size)     # Chrome / Electron send their icon this way
+        if pb:
+            return pb
+    src = SOURCE_ICON.get(n["source"])
+    generic = n["source"] in SOURCE_GLYPH
+    if not generic and src:
+        pb = theme_icon(src[0], size)          # a real app: its own (forged) icon
+        if pb:
+            return pb
+    if not generic:
+        pb = theme_icon(n["source"], size)      # app-name that is itself an icon name (obsidian, firefox)
+        if pb:
+            return pb
+    # generic sources (cockpit, orchestrator, forge): the outcome, then the payload, then the source, as a tinted stroke glyph
+    if n["kind"] in ("fail", "done"):
+        pb = glyph(KIND_GLYPH[n["kind"]], C[n["kind"]], size)
+        if pb:
+            return pb
+    for key, name in PAYLOAD_GLYPH:
+        if n.get(key) not in (None, [], ""):
+            pb = glyph(name, C["text"], size)
+            if pb:
+                return pb
+    if n["kind"] == "progress":
+        pb = glyph("in-progress", C["progress"], size)
+        if pb:
+            return pb
+    pb = glyph(SOURCE_GLYPH.get(n["source"], "status-ready"), C["muted"], size)
+    return pb or theme_icon("dialog-information", size)
+
+
+# ---------------------------------------------------------------- widgets
+
+class Series(Gtk.DrawingArea):
+    """A flat bar chart of numbers; the last bar is highlighted. No axes, the card title says what it is."""
+
+    def __init__(self, values: list[float], height: int = 48):
+        super().__init__()
+        self.values = [float(v) for v in values if isinstance(v, (int, float))][:120]
+        self.set_size_request(-1, height)
+        self.connect("draw", self.on_draw)
+
+    def on_draw(self, w, cr):
+        alloc = w.get_allocation()
+        W, H = alloc.width, alloc.height
+        if not self.values:
+            return
+        lo, hi = min(self.values + [0.0]), max(self.values + [0.0])
+        span = (hi - lo) or 1.0
+        n = len(self.values)
+        gap = 2 if n <= 60 else 1
+        bw = max(1.0, (W - gap * (n - 1)) / n)
+        zero = H - (0 - lo) / span * H
+        for i, v in enumerate(self.values):
+            x = i * (bw + gap)
+            y = H - (v - lo) / span * H
+            r, g, b = C["chart_last"] if i == n - 1 else C["chart"]
+            cr.set_source_rgb(r, g, b)
+            top, bot = min(y, zero), max(y, zero)
+            cr.rectangle(x, top, bw, max(1.0, bot - top))
+            cr.fill()
+
+
+class Card(Gtk.EventBox):
+    def __init__(self, server: "Server", n: dict):
+        super().__init__()
+        self.server, self.n = server, n
+        self.timer = 0
+        self.get_style_context().add_class("card")
+        if n["kind"] == "fail":
+            self.get_style_context().add_class("fail")
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.add(outer)
+        rail = Gtk.Box()
+        rail.get_style_context().add_class("rail")
+        colour = C["fail"] if n["kind"] == "fail" else C["done"] if n["kind"] == "done" else C.get(n["source"], C["rail_default"])
+        css = Gtk.CssProvider()
+        css.load_from_data(f".rail {{ background-color: {colour}; }}".encode())
+        rail.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        outer.pack_start(rail, False, False, 0)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        content.set_border_width(10)
+        outer.pack_start(content, True, True, 0)
+
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        if n.get("icon") is not None:
+            img = Gtk.Image.new_from_pixbuf(n["icon"])
+            img.set_valign(Gtk.Align.START)
+            head.pack_start(img, False, False, 0)
+        else:
+            src = Gtk.Label()
+            src.set_markup(f'<span color="{C.get(n["source"], C["muted"])}">{esc(n["source_label"])}</span>')
+            src.get_style_context().add_class("source")
+            src.set_valign(Gtk.Align.START)
+            head.pack_start(src, False, False, 0)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        head.pack_start(text, True, True, 0)
+        if n["title"]:
+            title = Gtk.Label(xalign=0)
+            title.set_markup(f"<b>{esc(n['title'])}</b>")
+            title.set_line_wrap(True)
+            title.set_max_width_chars(44)
+            title.get_style_context().add_class("title")
+            text.pack_start(title, False, False, 0)
+        if n["body"]:
+            body = Gtk.Label(xalign=0)
+            body.set_markup(safe_markup(n["body"]))
+            body.set_line_wrap(True)
+            body.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            body.set_max_width_chars(52)
+            body.set_lines(6)
+            body.set_ellipsize(Pango.EllipsizeMode.END)
+            body.get_style_context().add_class("body")
+            text.pack_start(body, False, False, 0)
+        self.count = Gtk.Label()
+        self.count.get_style_context().add_class("count")
+        self.count.set_valign(Gtk.Align.START)
+        head.pack_end(self.count, False, False, 0)
+        content.pack_start(head, False, False, 0)
+
+        # rich payloads, in a fixed order so a card with several reads the same every time
+        if n.get("progress") is not None:
+            self.bar = Gtk.ProgressBar()
+            self.bar.set_fraction(max(0.0, min(1.0, n["progress"] / 100.0)))
+            content.pack_start(self.bar, False, False, 0)
+        if n.get("picture") is not None:
+            pic = Gtk.Image.new_from_pixbuf(n["picture"])
+            pic.set_halign(Gtk.Align.START)
+            pic.get_style_context().add_class("pic")
+            content.pack_start(pic, False, False, 0)
+        if n.get("kv"):
+            grid = Gtk.Grid(column_spacing=14, row_spacing=2)
+            for i, (k, v) in enumerate(n["kv"][:8]):
+                kl = Gtk.Label(label=str(k), xalign=0)
+                kl.get_style_context().add_class("kv-k")
+                vl = Gtk.Label(xalign=0)
+                vl.set_markup(f"<b>{esc(str(v))}</b>")
+                vl.get_style_context().add_class("kv-v")
+                vl.set_ellipsize(Pango.EllipsizeMode.END)
+                vl.set_max_width_chars(40)
+                grid.attach(kl, 0, i, 1, 1)
+                grid.attach(vl, 1, i, 1, 1)
+            content.pack_start(grid, False, False, 0)
+        if n.get("series"):
+            content.pack_start(Series(n["series"]), False, False, 0)
+            if n.get("series_label"):
+                sl = Gtk.Label(label=n["series_label"], xalign=0)
+                sl.get_style_context().add_class("meta")
+                content.pack_start(sl, False, False, 0)
+        if n.get("list"):
+            for item in n["list"][:8]:
+                li = Gtk.Label(xalign=0)
+                li.set_markup("•  " + safe_markup(str(item)))
+                li.set_line_wrap(True)
+                li.set_max_width_chars(52)
+                li.get_style_context().add_class("body")
+                content.pack_start(li, False, False, 0)
+        if n.get("code"):
+            lines = n["code"].rstrip("\n").split("\n")
+            if len(lines) > 12:
+                lines = lines[:11] + [f"… {len(lines) - 11} more lines"]
+            code = Gtk.Label(xalign=0)
+            code.set_text("\n".join(lines))
+            code.set_ellipsize(Pango.EllipsizeMode.END)
+            code.set_max_width_chars(60)
+            code.get_style_context().add_class("code")
+            code.set_selectable(False)
+            content.pack_start(code, False, False, 0)
+        self.connect("button-press-event", self.on_click)
+        self.set_count(n.get("count", 1))
+
+    def set_count(self, c: int) -> None:
+        self.count.set_text(f"×{c}" if c > 1 else "")
+
+    def on_click(self, _w, ev):
+        if ev.button == 1:
+            self.server.activate(self)
+        elif ev.button == 2:
+            self.server.dismiss_all()
+        else:
+            self.server.close(self.n["id"], 2)
+        return True
+
+
+class Stack:
+    """A layer-shell window holding a column of cards on the primary monitor."""
+
+    def __init__(self, name: str, anchors: list, width: int):
+        self.name, self.width = name, width
+        self.win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+        self.win.set_title(f"cockpit-notify-{name}")
+        self.win.set_app_paintable(True)
+        vis = self.win.get_screen().get_rgba_visual()
+        if vis:
+            self.win.set_visual(vis)
+        GtkLayerShell.init_for_window(self.win)
+        GtkLayerShell.set_namespace(self.win, "cockpit-notify")
+        GtkLayerShell.set_layer(self.win, GtkLayerShell.Layer.TOP)
+        for edge in anchors:
+            GtkLayerShell.set_anchor(self.win, edge, True)
+            GtkLayerShell.set_margin(self.win, edge, 14)
+        GtkLayerShell.set_exclusive_zone(self.win, 0)
+        mon = primary_monitor()
+        if mon:
+            GtkLayerShell.set_monitor(self.win, mon)
+        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.box.set_size_request(width, -1)
+        self.win.add(self.box)
+        self.cards: list[Card] = []
+
+    def add(self, card: Card) -> None:
+        self.cards.insert(0, card)
+        self.box.pack_start(card, False, False, 0)
+        self.box.reorder_child(card, 0)
+        card.show_all()
+        self.refresh()
+
+    def remove(self, card: Card) -> None:
+        if card in self.cards:
+            self.cards.remove(card)
+            self.box.remove(card)
+        self.refresh()
+
+    def height(self) -> int:
+        return self.box.get_preferred_height()[1]
+
+    def limit(self) -> int:
+        mon = primary_monitor()
+        h = mon.get_geometry().height if mon else 1080
+        return h - 38 - 2 * 14 - 20          # bar, margins, breathing room
+
+    def refresh(self) -> None:
+        if self.cards:
+            self.win.show_all()
+            self.win.resize(self.width, 1)
+        else:
+            self.win.hide()
+
+
+def primary_monitor():
+    disp = Gdk.Display.get_default()
+    for i in range(disp.get_n_monitors()):
+        m = disp.get_monitor(i)
+        if m.get_geometry().x == PRIMARY_X:
+            return m
+    return disp.get_monitor(0) if disp.get_n_monitors() else None
+
+
+# ---------------------------------------------------------------- the D-Bus server (GDBus via Gio)
+
+NODE_XML = """
+<node>
+  <interface name="org.freedesktop.Notifications">
+    <method name="GetCapabilities"><arg direction="out" type="as"/></method>
+    <method name="GetServerInformation">
+      <arg direction="out" type="s"/><arg direction="out" type="s"/><arg direction="out" type="s"/><arg direction="out" type="s"/>
+    </method>
+    <method name="Notify">
+      <arg direction="in" type="s"/><arg direction="in" type="u"/><arg direction="in" type="s"/><arg direction="in" type="s"/>
+      <arg direction="in" type="s"/><arg direction="in" type="as"/><arg direction="in" type="a{sv}"/><arg direction="in" type="i"/>
+      <arg direction="out" type="u"/>
+    </method>
+    <method name="CloseNotification"><arg direction="in" type="u"/></method>
+    <signal name="NotificationClosed"><arg type="u"/><arg type="u"/></signal>
+    <signal name="ActionInvoked"><arg type="u"/><arg type="s"/></signal>
+  </interface>
+  <interface name="org.cockpit.Notify">
+    <method name="SetMode"><arg direction="in" type="s"/><arg direction="out" type="s"/></method>
+    <method name="GetMode"><arg direction="out" type="s"/></method>
+    <method name="DismissAll"/>
+    <method name="SetTheme"><arg direction="in" type="s"/><arg direction="out" type="s"/></method>
+  </interface>
+</node>
+"""
+PATH = "/org/freedesktop/Notifications"
+IFACE = "org.freedesktop.Notifications"
+
+
+class Server:
+    def __init__(self, conn: Gio.DBusConnection):
+        self.conn = conn
+        self.next_id = 1
+        self.live: dict[int, Card] = {}
+        self.main = Stack("main", [GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.RIGHT], CARD_W)
+        self.bottom = Stack("bottom", [GtkLayerShell.Edge.BOTTOM], 560)
+        self.groups: dict[str, int] = {}
+
+    def handle(self, conn, sender, path, iface, method, params, invocation):
+        try:
+            args = params.unpack()
+            if method == "GetCapabilities":
+                ret = GLib.Variant("(as)", (["body", "body-markup", "body-hyperlinks", "icon-static", "persistence", "actions"],))
+            elif method == "GetServerInformation":
+                ret = GLib.Variant("(ssss)", ("cockpit-notifyd", "cockpit", "0.2", "1.2"))
+            elif method == "Notify":
+                ret = GLib.Variant("(u)", (self.notify(*args),))
+            elif method == "CloseNotification":
+                self.close(int(args[0]), 3)
+                ret = None
+            elif method == "SetMode":
+                self.set_mode(str(args[0]))
+                ret = GLib.Variant("(s)", (read_mode(),))
+            elif method == "GetMode":
+                ret = GLib.Variant("(s)", (read_mode(),))
+            elif method == "DismissAll":
+                self.dismiss_all()
+                ret = None
+            elif method == "SetTheme":
+                ret = GLib.Variant("(s)", (self.set_theme(str(args[0])),))
+            else:
+                invocation.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method)
+                return
+            invocation.return_value(ret)
+        except Exception as e:  # never let one bad message kill the daemon
+            ledger_append({"event": "error", "method": method, "error": repr(e)[:300]})
+            try:
+                invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", str(e))
+            except Exception:
+                pass
+
+    def emit(self, name: str, sig: str, *vals) -> None:
+        try:
+            self.conn.emit_signal(None, PATH, IFACE, name, GLib.Variant(sig, vals))
+        except Exception:
+            pass
+
+    def notify(self, app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout) -> int:
+        h = dict(hints)
+        source = norm_source(str(app_name))
+        urgency = int(h.get("urgency", 1))
+        kind = str(h.get("x-cockpit-kind", "")) or ("progress" if "value" in h else "fail" if urgency == 2 else "info")
+        if kind not in ("info", "progress", "done", "fail"):
+            kind = "info"
+        acts = [str(a) for a in actions]
+        kv = jload(h.get("x-cockpit-kv"), [])
+        if isinstance(kv, dict):
+            kv = list(kv.items())
+        kv = [list(p)[:2] for p in kv if isinstance(p, (list, tuple)) and len(p) >= 2]
+        n = {
+            "id": int(replaces_id) or self._new_id(),
+            "source": source,
+            "source_label": {"cockpit": "cockpit", "claude-code": "Claude Code"}.get(source, str(app_name) or "cockpit"),
+            "kind": kind, "urgency": urgency, "title": str(summary), "body": str(body),
+            "actions": list(zip(acts[0::2], acts[1::2])),
+            "link": str(h.get("x-cockpit-link", "")), "group": str(h.get("x-cockpit-group", "")),
+            "focus": str(h.get("x-cockpit-focus", "")) or SOURCE_ICON.get(source, ("", ""))[1],
+            "progress": int(h["value"]) if "value" in h else None,
+            "kv": kv,
+            "series": [v for v in jload(h.get("x-cockpit-series"), []) if isinstance(v, (int, float))],
+            "series_label": str(h.get("x-cockpit-series-label", "")),
+            "list": [str(x) for x in jload(h.get("x-cockpit-list"), []) if x is not None],
+            "code": str(h.get("x-cockpit-code", "")),
+            "timeout": int(expire_timeout),
+        }
+        # a picture is an image-path (any client) or image-data flagged as a picture; an unflagged image-data is the app's icon
+        pic_path = str(h.get("image-path", "") or h.get("image_path", ""))
+        if pic_path:
+            n["picture"] = pixbuf_from_path(pic_path, None)
+        elif h.get("x-cockpit-image-is-picture") and h.get("image-data"):
+            n["picture"] = pixbuf_from_hint(h, None)
+        n["icon"] = resolve_icon(n, str(app_icon), h)
+        mode = read_mode()
+        shown = self._visible(n, mode)
+        ledger_append({"event": "notify", "id": n["id"], "source": source, "kind": kind, "urgency": urgency,
+                       "title": n["title"], "body": n["body"][:500], "link": n["link"], "group": n["group"],
+                       "payload": [k for k in ("progress", "picture", "kv", "series", "list", "code") if n.get(k) is not None and n.get(k) != [] and n.get(k) != ""],
+                       "mode": mode, "shown": shown})
+        if shown:
+            self._show(n)
+        return n["id"]
+
+    def _new_id(self) -> int:
+        self.next_id += 1
+        return self.next_id
+
+    def _visible(self, n: dict, mode: str) -> bool:
+        if n["source"] == "notify-mode" or n["urgency"] == 2:
+            return True
+        if mode == "dnd":
+            return False
+        if mode == "ai":
+            return n["source"] in AI_SOURCES
+        return True
+
+    def _stack_for(self, n: dict) -> Stack:
+        return self.bottom if n["source"] in ("jarvis", "notify-mode") else self.main
+
+    def _timeout_ms(self, n: dict) -> int:
+        if n["timeout"] > 0:
+            return n["timeout"]
+        if n["urgency"] == 2 or n["kind"] == "fail":
+            return 0
+        if n["kind"] == "progress":
+            return 60000
+        if n["source"] == "jarvis":
+            return 5000
+        if n["source"] == "notify-mode":
+            return 2500
+        if n["urgency"] == 0:
+            return 4000
+        if n.get("picture") is not None or n["kv"] or n["series"] or n["code"] or n["list"]:
+            return 20000
+        if n["kind"] == "done":
+            return 12000
+        if n["source"] in ("claude", "codex", "chatgpt", "claude-code"):
+            return 15000
+        return 8000
+
+    def _show(self, n: dict) -> None:
+        old = self.live.get(n["id"])
+        if not old and n["group"] and n["group"] in self.groups:
+            old = self.live.get(self.groups[n["group"]])
+        count = 1
+        if old:
+            count = old.n.get("count", 1) + (1 if n["group"] and n["id"] != old.n["id"] else 0)
+            self._drop(old)
+        n["count"] = count
+        card = Card(self, n)
+        self.live[n["id"]] = card
+        if n["group"]:
+            self.groups[n["group"]] = n["id"]
+        stack = self._stack_for(n)
+        stack.add(card)
+        while len(stack.cards) > MAX_VISIBLE or (len(stack.cards) > 1 and stack.height() > stack.limit()):
+            self.close(stack.cards[-1].n["id"], 1)
+        ms = self._timeout_ms(n)
+        if ms:
+            card.timer = GLib.timeout_add(ms, lambda: (self.close(n["id"], 1), False)[1])
+
+    def _drop(self, card: Card) -> None:
+        if card.timer:
+            GLib.source_remove(card.timer)
+            card.timer = 0
+        self.live.pop(card.n["id"], None)
+        self._stack_for(card.n).remove(card)
+
+    def close(self, nid: int, reason: int) -> None:
+        card = self.live.get(nid)
+        if card:
+            self._drop(card)
+            self.emit("NotificationClosed", "(uu)", nid, reason)
+
+    def activate(self, card: Card) -> None:
+        """Left click: the app's default action if it registered one, else the link, else focus the source window."""
+        n = card.n
+        did = ""
+        if any(k == "default" for k, _ in n["actions"]):
+            self.emit("ActionInvoked", "(us)", n["id"], "default")
+            did = "default"
+        elif n["link"] and re.match(r"^https?://", n["link"]):
+            spawn([CHROME, n["link"]])
+            did = "link " + n["link"]
+        elif n["focus"]:
+            hypr(f"hl.dsp.focus({{ window = {lua_str('class:' + n['focus'])} }})")
+            did = "focus " + n["focus"]
+        ledger_append({"event": "click", "id": n["id"], "source": n["source"], "title": n["title"], "did": did})
+        self.close(n["id"], 2)
+
+    def dismiss_all(self) -> None:
+        for nid in list(self.live):
+            self.close(nid, 2)
+
+    def set_theme(self, name: str) -> str:
+        if name not in THEMES:
+            return read_theme()
+        THEME_FILE.parent.mkdir(parents=True, exist_ok=True)
+        THEME_FILE.write_text(name)
+        C.clear()
+        C.update(THEMES[name])
+        _GLYPHS.clear()
+        apply_css()
+        for card in list(self.live.values()):     # rebuild live cards in the new skin
+            n = card.n
+            self._drop(card)
+            self._show(n)
+        return name
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in MODES:
+            return
+        write_mode(mode)
+        label = {"all": "all notifications", "ai": "AI only: Claude, Codex, Jarvis (+ critical)", "dnd": "do not disturb: critical only"}[mode]
+        self.notify("notify-mode", 0, "", f"🔔 {mode}", label, [], {}, -1)
+
+
+SERVER: Server
+_PROVIDER: list = []
+
+
+def apply_css() -> None:
+    screen = Gdk.Screen.get_default()
+    for old in _PROVIDER:
+        Gtk.StyleContext.remove_provider_for_screen(screen, old)
+    _PROVIDER.clear()
+    prov = Gtk.CssProvider()
+    prov.load_from_data(css_for(C).encode())
+    Gtk.StyleContext.add_provider_for_screen(screen, prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    _PROVIDER.append(prov)
+
+
+def main() -> int:
+    global SERVER
+    if "--help" in sys.argv:
+        print(__doc__)
+        return 0
+    Gtk.init([])
+    apply_css()
+    conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    SERVER = Server(conn)
+    node = Gio.DBusNodeInfo.new_for_xml(NODE_XML)
+    for iface in node.interfaces:
+        conn.register_object(PATH, iface, SERVER.handle, None, None)
+
+    def lost(_c, _n):
+        print("cockpit-notifyd: org.freedesktop.Notifications is taken (mako running?). Stop it first.", file=sys.stderr)
+        os._exit(2)
+
+    def acquired(_c, _n):
+        RUN.mkdir(parents=True, exist_ok=True)
+        (RUN / "pid").write_text(str(os.getpid()))
+        ledger_append({"event": "start", "pid": os.getpid()})
+
+    Gio.bus_own_name_on_connection(conn, IFACE, Gio.BusNameOwnerFlags.DO_NOT_QUEUE, acquired, lost)
+    Gtk.main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
