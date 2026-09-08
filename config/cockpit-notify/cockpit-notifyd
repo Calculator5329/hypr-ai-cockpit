@@ -142,7 +142,7 @@ SOURCE_ICON = {
 }
 GLYPH_DIR = HOME / ".local" / "share" / "cockpit-notify" / "glyphs"   # the visions 24px stroke set, tinted per theme
 KIND_GLYPH = {"fail": "blocked", "done": "done", "progress": "in-progress", "info": "status-ready"}
-PAYLOAD_GLYPH = [("series", "graph"), ("picture", "preview"), ("code", "evidence"), ("list", "item-task"), ("kv", "receipt")]
+PAYLOAD_GLYPH = [("series", "chart"), ("picture", "preview"), ("code", "evidence"), ("list", "item-task"), ("kv", "receipt")]
 SOURCE_GLYPH = {"orchestrator": "lane-run", "forge": "packet", "cockpit": "inbox", "notify-mode": "decision"}
 _GLYPHS: dict = {}
 

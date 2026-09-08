@@ -1,5 +1,15 @@
 # Changelog
 
+- 2026-09-08 — Notify cards: series cards carry a hand-drawn bar-chart glyph
+  (`glyphs/chart.svg`; the visions graph and timeline glyphs were both rejected
+  on sight), the kind glyph outranks the source icon for generic sources so a
+  failed cockpit card reads as failed, and Claude/Codex keep their forged app
+  icons. Jarvis (chezmoi, `~/.local/bin/jarvis`) now posts through
+  `cockpit-notify` with kinds, so a failed command is a red-rail card and a run
+  one is green; grown from the 2026-09-08 log it gained play (first YouTube hit,
+  YouTube Music, Spotify), stash (hide a window on an empty workspace), a
+  whisper silence-filler filter, comma-as-pause splitting and pronoun carry-over.
+
 - 2026-09-08 — `cockpit-notifyd` replaces mako as the notification daemon
   (`config/cockpit-notify/`). GTK3 + gtk-layer-shell, Gio GDBus (python-dbus is
   not installed). Every notification is ledgered; cards show the app's icon (the
